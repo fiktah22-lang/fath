@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0F1F1E">
+<title>برنامج الفتح</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="الفتح">
+<style>
+  html,body{margin:0;height:100%;background:#0F1F1E;overflow:hidden}
+  iframe{position:fixed;inset:0;width:100%;height:100%;border:0;background:#0F1F1E}
+  /* شاشة البدء: مطابقة لشاشة الموقع نفسه */
+  #splash{position:fixed;inset:0;display:grid;place-items:center;background:#0F1F1E;z-index:5;transition:opacity .35s}
+  #splash img{width:120px;border-radius:28px;animation:breathe 1.6s ease-in-out infinite}
+  #splash.gone{opacity:0;pointer-events:none}
+  @keyframes breathe{50%{transform:scale(.94);opacity:.8}}
+  @media (prefers-reduced-motion: reduce){#splash img{animation:none}}
+  #err{position:fixed;inset:0;display:none;place-items:center;color:#F3EBDC;font-family:Tahoma,sans-serif;text-align:center;padding:24px;z-index:6;background:#0F1F1E}
+</style>
+</head>
+<body>
+<div id="splash"><img src="icon-512.png" alt="برنامج الفتح"></div>
+<div id="err"><p>لم يُضبط رقم نشر الموقع في هذه الصفحة بعد.</p></div>
+<script>
+/* ====== اضبط هذا السطر مرة واحدة ======
+   رقم نشر موقع الفتح: من رابط الموقع  https://script.google.com/macros/s/ هذا_الرقم /exec  */
+var DEPLOY = 'ضع_رقم_النشر_هنا';
+/* ====================================== */
+(function(){
+  // لا تفتح هذه الصفحة إلا موقع الفتح نفسه
+  if (!/^AKfy[A-Za-z0-9_-]{20,}$/.test(DEPLOY)) { document.getElementById('err').style.display = 'grid'; document.getElementById('splash').className = 'gone'; return; }
+  var base = 'https://script.google.com/macros/s/' + DEPLOY + '/exec';
+  // بطاقة الدخول: ?n=رقم&k=مفتاح تُمرَّر إلى الموقع
+  var q = new URLSearchParams(location.search), pass = new URLSearchParams();
+  ['n','k'].forEach(function(x){ var v = q.get(x); if (v && /^[A-Za-z0-9_-]{1,40}$/.test(v)) pass.set(x, v); });
+  var src = base + (pass.toString() ? '?' + pass.toString() : '');
+  if (pass.toString()) history.replaceState(null, '', location.pathname);   // لا يبقى المفتاح في شريط العنوان
+
+  // التوقيع: في مكانين، لأن أحدهما قد يُمسح
+  var TK = 'fath_tok';
+  function getTok(){ try { var t = localStorage.getItem(TK); if (t) return t; } catch(e){} var m = document.cookie.match(/(?:^|; )fath_tok=([^;]+)/); return m ? decodeURIComponent(m[1]) : ''; }
+  function setTok(t){ try { localStorage.setItem(TK, t); } catch(e){} document.cookie = 'fath_tok=' + encodeURIComponent(t) + ';max-age=31536000;path=/;secure;samesite=strict'; }
+  function clrTok(){ try { localStorage.removeItem(TK); } catch(e){} document.cookie = 'fath_tok=;max-age=0;path=/'; }
+
+  // صفحات المصحف: تُحفظ في الجهاز (IndexedDB هنا، لأن المتصفح يمسح مخزن إطار Google)
+  var dbp = null;
+  function db(){ if (dbp) return dbp; dbp = new Promise(function(res, rej){ var r = indexedDB.open('fath', 1); r.onupgradeneeded = function(){ r.result.createObjectStore('pages'); }; r.onsuccess = function(){ res(r.result); }; r.onerror = function(){ rej(r.error); }; }); return dbp; }
+  function idbGet(k){ return db().then(function(d){ return new Promise(function(res){ var t = d.transaction('pages').objectStore('pages').get(k); t.onsuccess = function(){ res(t.result || null); }; t.onerror = function(){ res(null); }; }); }).catch(function(){ return null; }); }
+  function idbPut(k, v){ return db().then(function(d){ d.transaction('pages', 'readwrite').objectStore('pages').put(v, k); }).catch(function(){}); }
+  var MUSHAF = function(p){ return 'https://cdn.jsdelivr.net/gh/SakinaDevGroup/mushaf-madani-cdn@main/light/p' + p + '.png'; };
+  function page(p){
+    p = Number(p); if (!(p >= 1 && p <= 604)) return Promise.resolve('');
+    return idbGet('q' + p).then(function(hit){
+      if (hit) return hit;
+      return fetch(MUSHAF(p)).then(function(r){ if (!r.ok) throw 0; return r.blob(); }).then(function(b){
+        return new Promise(function(res){ var fr = new FileReader(); fr.onload = function(){ idbPut('q' + p, fr.result); res(fr.result); }; fr.readAsDataURL(b); }); })
+      .catch(function(){ return MUSHAF(p); });
+    });
+  }
+
+  // التثبيت على الجوال
+  var deferred = null, frameWin = null, frameOrigin = '';
+  window.addEventListener('beforeinstallprompt', function(e){ e.preventDefault(); deferred = e; tell({type:'install', can:true}); });
+  function tell(m){ if (frameWin && frameOrigin) { m.fath = 1; frameWin.postMessage(m, frameOrigin); } }
+  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(function(){});
+
+  var splash = document.getElementById('splash');
+  function hide(){ splash.className = 'gone'; }
+  // الرسائل: لا تُقبل إلا من إطار Google الذي يعرض الموقع
+  window.addEventListener('message', function(ev){
+    if (!/^https:\/\/[a-z0-9-]+\.script\.googleusercontent\.com$/.test(ev.origin) && !/^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/.test(ev.origin)) return;
+    var m = ev.data; if (!m || !m.fath) return;
+    frameWin = ev.source; frameOrigin = ev.origin;
+    if (m.type === 'ready') { var t = getTok(); if (t) ev.source.postMessage({fath:1, type:'tok', tok:t}, ev.origin); hide(); if (deferred) tell({type:'install', can:true}); }
+    else if (m.type === 'tok' && typeof m.tok === 'string' && m.tok.length < 2000) { setTok(m.tok); hide(); if (deferred) tell({type:'install', can:true}); }
+    else if (m.type === 'logout') clrTok();
+    else if (m.type === 'role') hide();
+    else if (m.type === 'page') page(m.p).then(function(s){ ev.source.postMessage({fath:1, type:'page', p:m.p, src:s}, ev.origin); });
+    else if (m.type === 'install' && deferred) { deferred.prompt(); deferred.userChoice.finally(function(){ deferred = null; tell({type:'install', can:false}); }); }
+  });
+  var f = document.createElement('iframe');
+  f.src = src; f.allow = 'clipboard-write; web-share'; f.title = 'برنامج الفتح';
+  f.onload = function(){ setTimeout(hide, 2500); };
+  document.body.appendChild(f);
+})();
+</script>
+</body>
+</html>
